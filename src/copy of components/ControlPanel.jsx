@@ -3,45 +3,54 @@ import ParameterSlider from "./ParameterSlider";
 import CurveChart from "./CurveChart";
 import ExportButton from "./ExportButton";
 import PotDial from "./PotDial";
-
 import {
   Box,
   Typography,
   Button,
   Grid,
-  Divider,
   ToggleButton,
+  FormControlLabel,
+  Switch,
 } from "@mui/material";
 
+// Valores iniciales (mapa por defecto = Mapa 2)
 const INIT_PROFILE = {
-  P1: 6,
-  P4: 4,
+  P1: 15,
+  P4: 6,
   P5: 4,
-  P7: 8,
+  P7: 10,
   P8: 8,
   P10: 1,
-  P11: 2,
+  P11: 1,
   P14: 6,
   P15: 6,
   P16: 2,
   potValue: 15,
 };
 
-const FIXED_COLORS = [
-  "#000000", "#2196f3", "#000000", "#4caf50", "#fb8c00", "#f44336"
+const MAPAS_PREDEFINIDOS = [
+  { nombre: "Mapa 1", P1:15,P4:4,P5:4,P7:1,P8:8,P10:1,P11:2,P14:6,P15:6,P16:2,potValue:15 },
+  { nombre: "Mapa 2", P1:15,P4:6,P5:4,P7:10,P8:8,P10:1,P11:1,P14:6,P15:6,P16:2,potValue:15 },
+  { nombre: "Mapa 3", P1:15,P4:8,P5:4,P7:1,P8:10,P10:1,P11:2,P14:6,P15:6,P16:2,potValue:15 },
+  { nombre: "Mapa 4", P1:15,P4:8,P5:4,P7:1,P8:10,P10:2,P11:1,P14:6,P15:6,P16:2,potValue:15 },
 ];
-const MAX_CURVES = 6;
+
+const PARAM_NAMES = {
+  P4: "Potencia", P5: "Aceleración", P7: "Zona de Potencia",
+  P8: "Paso por Curva", P10: "Pot. Multifunción", P11: "Anticipar Frenada",
+  P14: "Velocidad Entrada Freno", P15: "Freno Mínimo", P16: "Sensibilidad Potencia",
+};
 
 const PARAM_EXPLANATIONS = {
-  P4: "Límite máximo de voltaje que regula el potenciómetro.",
-  P5: "Ajusta la respuesta de la aceleración.",
-  P7: "Controla la forma de la curva de entrega.",
-  P8: "Modifica la entrega al salir de una curva.",
-  P10: "Usa el potenciómetro doble como freno o voltaje.",
-  P11: "Activa el freno antes de soltar el gatillo.",
-  P14: "Controla la velocidad a la que entra el freno.",
-  P15: "Define el mínimo de freno siempre aplicado.",
-  P16: "Ajusta la sensibilidad del potenciómetro.",
+  P4: "Límite máximo de voltaje de salida",
+  P5: "Respuesta de aceleración del motor",
+  P7: "Zona del gatillo donde actúa el potenciómetro",
+  P8: "Entrega tras curva",
+  P10: "Potenciómetro doble: freno o voltaje",
+  P11: "Anticipación del frenado al soltar gatillo",
+  P14: "Velocidad de entrada del freno",
+  P15: "Nivel de freno mínimo constante",
+  P16: "Sensibilidad del potenciómetro de potencia",
 };
 
 export default function ControlPanel() {
@@ -49,168 +58,190 @@ export default function ControlPanel() {
   const [config1, setConfig1] = useState({ ...INIT_PROFILE });
   const [visibility, setVisibility] = useState([true]);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [useP8, setUseP8] = useState(true);
 
-  const getProfile = (idx) =>
-    idx === 0 ? config1 : profiles[idx - 1];
-
+  const getProfile = i => i === 0 ? config1 : profiles[i - 1];
   const handleChange = (param, value) => {
     if (selectedIndex === 0) {
-      setConfig1((prev) => ({ ...prev, [param]: value }));
+      setConfig1(prev => ({ ...prev, [param]: value }));
     } else {
       const updated = [...profiles];
-      updated[selectedIndex - 1] = {
-        ...updated[selectedIndex - 1],
-        [param]: value,
-      };
+      updated[selectedIndex - 1] = { ...updated[selectedIndex - 1], [param]: value };
       setProfiles(updated);
     }
   };
-
   const addProfile = () => {
-    if (profiles.length >= MAX_CURVES - 1) return;
+    if (profiles.length >= 5) return;
     const newProfile = { ...getProfile(selectedIndex) };
-    setProfiles((prev) => [...prev, newProfile]);
-    setVisibility((prev) => [...prev, true]);
+    setProfiles([...profiles, newProfile]);
+    setVisibility([...visibility, true]);
     setSelectedIndex(profiles.length + 1);
   };
-
-  const toggleVisibility = (index) => {
-    const updated = [...visibility];
-    updated[index] = !updated[index];
-    setVisibility(updated);
-  };
-
   const reset = () => {
     setConfig1({ ...INIT_PROFILE });
     setProfiles([]);
     setVisibility([true]);
     setSelectedIndex(0);
   };
+  const showMapasPredefinidos = () => {
+    setProfiles(MAPAS_PREDEFINIDOS.map(m => ({ ...m })));
+    setVisibility(Array(MAPAS_PREDEFINIDOS.length + 1).fill(true));
+    setSelectedIndex(1);
+  };
+  const toggleVisibility = i => {
+    const v = [...visibility]; v[i] = !v[i]; setVisibility(v);
+  };
 
-  const profilesToShow = [config1, ...profiles].filter((_, i) => visibility[i] !== false);
-
+  const profilesToChart = [config1, ...profiles].filter((_, i) => visibility[i]);
+  
   return (
-    <Box sx={{ p: 3, maxWidth: "1200px", margin: "0 auto" }}>
-      {/* Logo */}
-      <Box sx={{ display: "flex", justifyContent: "flex-start", mb: 2 }}>
-        <img
-          src="/tictac-logo.png"
-          alt="Logo TICTAC"
-          style={{ height: "60px", objectFit: "contain", marginLeft: 8 }}
-        />
-      </Box>
+    <Box sx={{ padding:2 }}>
+      {/* Logo restaurado */}
+      <Typography variant="h4" align="center" gutterBottom>
+        ⚡ TICTAC V7 Simulator
+      </Typography>
 
-      {/* Recuadro de potenciómetros */}
-      <Box
-        sx={{
-          border: "1px solid #ccc",
-          borderRadius: 2,
-          p: 2,
-          px: 3,
-          mb: 3,
-          maxWidth: 400,
-          backgroundColor: "#f2f2f2", // gris claro para buen contraste
-          color: "#000",
-        }}
-      >
-        <Typography variant="subtitle1" sx={{ mb: 2 }}>
-          🎛 Diales del mando
-        </Typography>
-        <Grid container spacing={2} alignItems="center">
-          <Grid item xs={6}>
-            <PotDial
-              label="Freno"
-              value={getProfile(selectedIndex).P1}
-              onChange={(v) => handleChange("P1", v)}
-            />
-          </Grid>
-          <Grid item xs={6}>
-            <PotDial
-              label="Voltaje"
-              value={getProfile(selectedIndex).potValue}
-              onChange={(v) => handleChange("potValue", v)}
-            />
-          </Grid>
+      <Typography variant="h5" gutterBottom>🎛 Diales del mando</Typography>
+      <Grid container spacing={2} mb={3}>
+        <Grid item xs={6}>
+          <PotDial
+            label="Freno"
+            value={getProfile(selectedIndex).P1}
+            onChange={v => handleChange("P1", v)}
+          />
         </Grid>
-      </Box>
+        <Grid item xs={6}>
+          <PotDial
+            label="Potencia"
+            value={getProfile(selectedIndex).potValue}
+            onChange={v => handleChange("potValue", v)}
+          />
+        </Grid>
+      </Grid>
 
-      {/* Sliders por grupos */}
-      <Grid container spacing={2}>
-        {/* Izquierda: curva */}
-        <Grid item xs={12} md={6}>
-          <Typography variant="subtitle1">⚙️ Parámetros de curva</Typography>
-          {["P4", "P7", "P8", "P16"].map((param) => (
-            <Box key={param} sx={{ mb: 2 }}>
-              <Typography variant="body2" gutterBottom>
-                {PARAM_EXPLANATIONS[param]}
+      <Typography variant="h6" gutterBottom>⚙️ Parámetros de curva</Typography>
+      <Grid container spacing={3}>
+        <Grid item xs={6}>
+          {["P4", "P7"].map(param => (
+            <Box key={param} mb={2}>
+              <Typography
+                variant="body2"
+                sx={{ color:"#FFFFFF", fontSize:"1rem" }}
+              >
+                <strong>
+                  {param} ({getProfile(selectedIndex)[param]}) – {PARAM_NAMES[param]}
+                </strong>
+                {" – " + PARAM_EXPLANATIONS[param]}
               </Typography>
               <ParameterSlider
                 label={param}
                 value={getProfile(selectedIndex)[param]}
-                onChange={(v) => handleChange(param, v)}
+                onChange={v => handleChange(param, v)}
               />
             </Box>
           ))}
         </Grid>
-
-        {/* Derecha: resto */}
-        <Grid item xs={12} md={6}>
-          <Typography variant="subtitle1">🔧 Parámetros adicionales</Typography>
-          {["P5", "P10", "P11", "P14", "P15"].map((param) => (
-            <Box key={param} sx={{ mb: 2 }}>
-              <Typography variant="body2" gutterBottom>
-                {PARAM_EXPLANATIONS[param]}
+        <Grid item xs={6}>
+          {["P8", "P16"].map(param => (
+            <Box key={param} mb={2}>
+              <Typography
+                variant="body2"
+                sx={{ color:"#FFFFFF", fontSize:"1rem" }}
+              >
+                <strong>
+                  {param} ({getProfile(selectedIndex)[param]}) – {PARAM_NAMES[param]}
+                </strong>
+                {" – " + PARAM_EXPLANATIONS[param]}
               </Typography>
               <ParameterSlider
                 label={param}
                 value={getProfile(selectedIndex)[param]}
-                onChange={(v) => handleChange(param, v)}
+                onChange={v => handleChange(param, v)}
               />
             </Box>
           ))}
         </Grid>
       </Grid>
 
-      {/* Botones */}
-      <Box sx={{ my: 2 }}>
-        <Button
-          variant="contained"
-          onClick={addProfile}
-          disabled={profiles.length >= MAX_CURVES - 1}
-          sx={{ mr: 2 }}
-        >
-          ➕ Nueva curva
-        </Button>
-        <Button variant="outlined" onClick={reset}>Reset</Button>
-      </Box>
-
-      {/* Chart */}
-      <CurveChart
-        profiles={profilesToShow}
-        selectedIndex={selectedIndex}
-        onLegendClick={(i) => setSelectedIndex(i)}
+      <FormControlLabel
+        control={<Switch checked={useP8} onChange={() => setUseP8(!useP8)} />}
+        label="Usar P8 (Paso por Curva)"
       />
 
-      {/* Curvas activas */}
-      <Typography variant="subtitle1" sx={{ mt: 3 }}>
-        📊 Curvas activas
-      </Typography>
-      <Grid container spacing={1}>
-        {[config1, ...profiles].map((_, i) => (
-          <Grid item key={i}>
-            <ToggleButton
-              selected={visibility[i] !== false}
-              onChange={() => toggleVisibility(i)}
-              color={selectedIndex === i ? "primary" : "standard"}
-            >
-              {`Config ${i + 1} ${visibility[i] === false ? "Mostrar" : "Ocultar"}`}
-            </ToggleButton>
-          </Grid>
-        ))}
+      <Typography variant="h6" gutterBottom mt={2}>🔧 Parámetros adicionales</Typography>
+      <Grid container spacing={3}>
+        <Grid item xs={6}>
+          {["P5", "P10", "P14"].map(param => (
+            <Box key={param} mb={2}>
+              <Typography
+                variant="body2"
+                sx={{ color:"#FFFFFF", fontSize:"1rem" }}
+              >
+                <strong>
+                  {param} ({getProfile(selectedIndex)[param]}) – {PARAM_NAMES[param]}
+                </strong>
+                {" – " + PARAM_EXPLANATIONS[param]}
+              </Typography>
+              <ParameterSlider
+                label={param}
+                value={getProfile(selectedIndex)[param]}
+                onChange={v => handleChange(param, v)}
+              />
+            </Box>
+          ))}
+        </Grid>
+        <Grid item xs={6}>
+          {["P11", "P15"].map(param => (
+            <Box key={param} mb={2}>
+              <Typography
+                variant="body2"
+                sx={{ color:"#FFFFFF", fontSize:"1rem" }}
+              >
+                <strong>
+                  {param} ({getProfile(selectedIndex)[param]}) – {PARAM_NAMES[param]}
+                </strong>
+                {" – " + PARAM_EXPLANATIONS[param]}
+              </Typography>
+              <ParameterSlider
+                label={param}
+                value={getProfile(selectedIndex)[param]}
+                onChange={v => handleChange(param, v)}
+              />
+            </Box>
+          ))}
+        </Grid>
       </Grid>
 
-      {/* Exportar */}
-      <ExportButton profiles={profilesToShow} />
+      <Box sx={{ display:"flex", gap:2, my:2 }}>
+        <Button variant="contained" onClick={addProfile}>➕ Nueva curva</Button>
+        <Button variant="outlined" onClick={reset}>🔄 Reset</Button>
+        <Button variant="outlined" onClick={showMapasPredefinidos}>📋 Mostrar mapas predefinidos</Button>
+      </Box>
+
+      <Typography variant="h6" gutterBottom>📊 Curvas activas</Typography>
+      <Box sx={{ display:"flex", flexWrap:"wrap", gap:1, mb:2 }}>
+        {[config1, ...profiles].map((p,i) => (
+          <ToggleButton
+            key={i}
+            value={i}
+            selected={visibility[i]}
+            onChange={() => toggleVisibility(i)}
+            color={selectedIndex===i?"primary":"standard"}
+            onClick={() => setSelectedIndex(i)}
+          >
+            {p.nombre||`Config ${i+1}`}
+          </ToggleButton>
+        ))}
+      </Box>
+
+      <CurveChart
+        profiles={profilesToChart}
+        selectedIndex={selectedIndex}
+        useP8={useP8}
+        showPowerZone={true}
+      />
+
+      <ExportButton profiles={profilesToChart} />
     </Box>
   );
 }

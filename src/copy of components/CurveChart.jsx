@@ -13,72 +13,107 @@ import {
 
 ChartJS.register(LineElement, PointElement, LinearScale, CategoryScale, Legend, Tooltip, Filler);
 
-const FIXED_COLORS = ["#000000", "#2196f3", "#000000", "#4caf50", "#fb8c00", "#f44336"];
+const FIXED_COLORS = ["#000000", "#2196f3", "#4caf50", "#ff9800", "#f44336"];
 
-function generateCurveData(params) {
-  const result = [];
-  const P4 = params.P4 ?? 6;
-  const potValue = params.potValue ?? 15;
-  const shape = params.P7 ?? 8;
-  const range = (P4 / 15) * (potValue / 15);
-
-  for (let i = 0; i <= 100; i++) {
-    const x = i / 100;
-    let y = x;
-    if (shape < 8) y = Math.pow(x, 1 + 0.2 * (8 - shape));
-    else if (shape > 8) y = Math.pow(x, 1 / (1 + 0.2 * (shape - 8)));
-    y *= range * 12;
-    result.push({ x: i, y: parseFloat(y.toFixed(2)) });
-  }
-
-  return result;
+function calculatePowerZone(P7) {
+  const norm = (P7 - 1) / 14;
+  const center = 0.2 + norm * 0.6;
+  const width = 0.4;
+  return {
+    start: Math.max(0, center - width/2),
+    end: Math.min(1, center + width/2),
+    center
+  };
 }
 
-export default function CurveChart({ profiles, selectedIndex, onLegendClick }) {
-  const datasets = profiles.map((profile, idx) => ({
-    label: `Config ${idx + 1}${idx === selectedIndex ? " (seleccionada)" : ""}`,
-    data: generateCurveData(profile),
-    borderColor: idx === selectedIndex ? "#000000" : FIXED_COLORS[idx % FIXED_COLORS.length],
-    borderWidth: idx === selectedIndex ? 4 : 2,
-    fill: false,
-    tension: 0.2,
+function generateCurveData(params, useP8=true) {
+  const { P4=6,P5=4,P7=10,P8=8,P16=2,potValue=15 } = params;
+  const potNorm = potValue/15;
+  const sensitivity = Math.pow(potNorm, 2.7 - ((P16-1)*(2.2/14)));
+  const powerFactor = (P4/15)*sensitivity;
+  const accelFactor = 1 + ((P5-1)*0.1/14);
+  const multiplier = useP8 ? 0.6 + ((P8-1)*(0.8/14)) : 1;
+  const zone = calculatePowerZone(P7);
+
+  return Array.from({ length:101 }, (_,i) => {
+    const x = i/100;
+    let y = Math.pow(x, 1/accelFactor);
+    const dist = Math.abs(x - zone.center);
+    const maxDist = zone.end - zone.start;
+    const zoneEff = Math.max(0, 1 - (dist/maxDist)*2);
+    y *= 0.5 + zoneEff*0.5*potNorm;
+    return { x:i, y:parseFloat((y*powerFactor*multiplier*12).toFixed(2)) };
+  });
+}
+
+function generatePowerZoneData(P7) {
+  const { start,end } = calculatePowerZone(P7);
+  const s = Math.round(start*100), e = Math.round(end*100);
+  return Array.from({ length:101 }, (_,i) => ({
+    x:i, y: (i>=s && i<=e) ? 12 : 0
+  }));
+}
+
+export default function CurveChart({
+  profiles, selectedIndex, onLegendClick, useP8, showPowerZone=false
+}) {
+  const datasets = profiles.map((p,idx) => ({
+    label: p.nombre||`Config ${idx+1}${idx===selectedIndex?" (seleccionada)":""}`,
+    data: generateCurveData(p,useP8),
+    borderColor: idx===selectedIndex?"#000":FIXED_COLORS[idx%FIXED_COLORS.length],
+    borderWidth: idx===selectedIndex?4:2,
+    fill: false, tension:0.2, pointRadius:0, pointHoverRadius:5
   }));
 
+  if (showPowerZone && profiles.length) {
+    const P7 = profiles[selectedIndex]?.P7 ?? profiles[0].P7;
+    datasets.push({
+      label: `Zona de Potencia P7=${P7} (${Math.round(calculatePowerZone(P7).start*100)}%-${Math.round(calculatePowerZone(P7).end*100)}%)`,
+      data: generatePowerZoneData(P7),
+      backgroundColor:"rgba(255,193,7,0.2)",
+      borderColor:"rgba(255,193,7,0.5)",
+      fill:true, borderWidth:1, tension:0, pointRadius:0, pointHoverRadius:0
+    });
+  }
+
+  const options = {
+    responsive:true,
+    maintainAspectRatio:false,
+    plugins:{
+      legend:{ position:"top", onClick:onLegendClick },
+      tooltip:{
+        mode:"index", intersect:false,
+      },
+      beforeDraw: chart => {
+        const ctx = chart.ctx;
+        ctx.save();
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0,0,chart.width,chart.height);
+        ctx.restore();
+      }
+    },
+    scales:{
+      x:{
+        type:"linear", position:"bottom",
+        title:{ display:true, text:"Posición del gatillo (%)" },
+        min:0, max:100,
+        grid:{ color:"#e0e0e0" }
+      },
+      y:{
+        title:{ display:true, text:"Voltaje (V)" },
+        min:0, max:12,
+        grid:{ color:"#e0e0e0" }
+      }
+    },
+  };
+
   return (
-    <div style={{ backgroundColor: "#ffffff", padding: "20px", borderRadius: "8px" }}>
-      <Line
-        data={{
-          labels: Array.from({ length: 101 }, (_, i) => `${i}%`),
-          datasets,
-        }}
-        options={{
-          responsive: true,
-          plugins: {
-            legend: {
-              position: "top",
-              labels: { color: "#000" },
-              onClick: (_, legendItem) => {
-                if (onLegendClick) onLegendClick(legendItem.datasetIndex);
-              },
-            },
-          },
-          layout: {
-            padding: 20,
-          },
-          scales: {
-            x: {
-              ticks: { color: "#000" },
-              title: { display: true, text: "Gatillo (%)", color: "#000" },
-            },
-            y: {
-              min: 0,
-              max: 12,
-              ticks: { color: "#000" },
-              title: { display: true, text: "Voltaje (V)", color: "#000" },
-            },
-          },
-        }}
-      />
+    <div style={{
+      height:"400px", backgroundColor:"#FFFFFF",
+      padding:"12px", borderRadius:"8px",
+      boxShadow:"0 2px 4px rgba(0,0,0,0.1)"
+    }}>
+      <Line data={{ datasets }} options={options}/>
     </div>
   );
 }

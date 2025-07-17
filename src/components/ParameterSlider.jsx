@@ -1,20 +1,17 @@
+// ParameterSlider.jsx
 import React from "react";
-import { Slider, Typography, Box } from "@mui/material";
+import { Box, Slider } from "@mui/material";
 
-export default function ParameterSlider({ label, value, onChange, min = 1, max = 15 }) {
+export default function ParameterSlider({ label, value, onChange }) {
   return (
-    <Box mb={2}>
-      <Typography variant="body2">
-        {label}: {value}
-      </Typography>
+    <Box>
       <Slider
         value={value}
-        onChange={(e, newVal) => onChange(newVal)}
-        min={min}
-        max={max}
+        min={1}
+        max={15}
         step={1}
-        marks
-        valueLabelDisplay="auto"
+        onChange={(_, v) => onChange(v)}
+        sx={{ color: "#29b6f6" }}
       />
     </Box>
   );
