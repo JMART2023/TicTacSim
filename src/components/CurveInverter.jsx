@@ -20,78 +20,66 @@ const POINTS = 15;
 
 const PARAMS = [
   { key: "P4", desc: "Potencia (V máx. salida)" },
-  { key: "P5", desc: "Aceleración (Respuesta acelerador)" },
-  { key: "P7", desc: "Zona Potencia (Dónde actúa)" },
-  { key: "P8", desc: "Paso por Curva (Entrega tras curva)" },
-  { key: "P10", desc: "Pot. Multifunción (Freno/volt)" },
-  { key: "P11", desc: "Anticipar Frenada (Adelanto freno)" },
-  { key: "P14", desc: "Velocidad Entrada Freno" },
-  { key: "P15", desc: "Freno Mínimo" },
+  { key: "P5", desc: "Aceleración" },
+  { key: "P7", desc: "Zona Potencia" },
+  { key: "P8", desc: "Paso por Curva" },
   { key: "P16", desc: "Sensibilidad Potenciómetro" }
 ];
 
+// --- Motor fiel TICTAC ---
+function calculatePowerZone(P7) {
+  const normalized = (P7 - 1) / 14;
+  const center = 0.2 + normalized * 0.6;
+  const width = 0.4;
+  return { start: Math.max(0, center - width / 2), end: Math.min(1, center + width / 2), center };
+}
+function simulateCurve({ P4, P5, P7, P8, P16, potValue, maxV }) {
+  const potNorm = potValue / 15;
+  const sensitivity = Math.pow(potNorm, 2.7 - ((P16 - 1) * (2.2 / 14)));
+  const powerFactor = (P4 / 15) * sensitivity;
+  const accelFactor = 1 + ((P5 - 1) * 0.1 / 14);
+  const multiplier = 0.6 + ((P8 - 1) * (0.8 / 14));
+  const zone = calculatePowerZone(P7);
+  let arr = [];
+  for (let i = 0; i <= 100; i++) {
+    const x = i / 100, dist = Math.abs(x - zone.center), maxDist = zone.end - zone.start;
+    let y = Math.pow(x, 1 / accelFactor); // progresividad fiel
+    const zoneEff = Math.max(0, 1 - (dist / maxDist) * 2);
+    y *= (0.5 + zoneEff * 0.5 * potNorm); // peak zona potencia
+    y *= powerFactor * multiplier;
+    arr.push(y);
+  }
+  // Ajuste total para que SIEMPRE el punto 100% sea máx. (fiel, aunque varía el perfil)
+  const scale = arr[100] ? (maxV / arr[100]) : 1;
+  return arr.map(v => v * scale);
+}
 function interpolateCurve(values) {
-  const step = 100 / (values.length - 1);
-  const curve = [];
+  const step = 100 / (values.length - 1), curve = [];
   for (let i = 0; i <= 100; ++i) {
-    const idx = Math.floor(i / step);
-    const frac = (i % step) / step;
+    const idx = Math.floor(i / step), frac = (i % step) / step;
     if (idx >= values.length - 1) curve.push(values[values.length - 1]);
     else curve.push(values[idx] + frac * (values[idx + 1] - values[idx]));
   }
   return curve;
 }
-
-function simulateCurve(P, volt) {
-  const { P4, P5, P7, P8, P10, P11, P14, P15, P16 } = P;
-  let simCurve = [];
-  for (let i = 0; i <= 100; i++) {
-    simCurve.push(
-      volt * (i / 100) * (P4 / 15) * (P5 / 15) * ((16 - P7) / 15) *
-      (P8 / 15) * (P10 / 2) * (P11 / 2) * (P14 / 15) *
-      (P15 / 15) * (P16 / 15)
-    );
-  }
-  return simCurve;
-}
-
 function findClosestConfigs(target, minV, maxV) {
-  const combos = [];
-  for (let P4 = 4; P4 <= 15; P4 += 3) {
-    for (let P5 = 1; P5 <= 15; P5 += 7) {
-      for (let P7 = 1; P7 <= 15; P7 += 7) {
-        for (let P8 = 1; P8 <= 15; P8 += 7) {
-          for (let P10 = 1; P10 <= 2; P10++) {
-            for (let P11 = 1; P11 <= 2; P11++) {
-              for (let P14 = 1; P14 <= 15; P14 += 7) {
-                for (let P15 = 1; P15 <= 15; P15 += 7) {
-                  for (let P16 = 1; P16 <= 15; P16 += 7) {
-                    for (let volt = minV; volt <= maxV; volt += 0.5) {
-                      const P = { P4, P5, P7, P8, P10, P11, P14, P15, P16 };
-                      let c = simulateCurve(P, volt);
-
-                      // Si algún punto excede el voltaje máximo, marcar overflow
-                      let overflow = c.some(v => v > volt + 0.05);
-                      let error = c.reduce((acc, v, idx) => acc + Math.abs(v - target[idx]), 0);
-                      combos.push({
-                        ...P,
-                        volt: Number(volt.toFixed(2)),
-                        error,
-                        overflow,
-                        simCurve: c
-                      });
-                    }
-                  }
-                }
+  // 486 combinaciones: seguro, variado, rápido.
+  const P4s = [6, 10, 15], P5s = [4, 10, 15], P7s = [1, 8, 15], P8s = [4, 10, 15], P16s = [2, 8, 15], potVs = [13, 15];
+  let result = [], id = 0;
+  for (let P4 of P4s)
+    for (let P5 of P5s)
+      for (let P7 of P7s)
+        for (let P8 of P8s)
+          for (let P16 of P16s)
+            for (let potValue of potVs)
+              for (let maxv = Number(minV); maxv <= Number(maxV); maxv += 1) {
+                const params = { P4, P5, P7, P8, P16, potValue, maxV: maxv };
+                const curve = simulateCurve(params);
+                const overflow = curve.some(v => v > maxv + 0.02);
+                const error = curve.reduce((acc, v, idx) => acc + Math.abs(v - target[idx]), 0);
+                result.push({ ...params, error, overflow, simCurve: curve, _id: ++id });
               }
-            }
-          }
-        }
-      }
-    }
-  }
-  combos.sort((a, b) => a.error - b.error);
-  return combos.slice(0, 5);
+  return result.sort((a, b) => a.error - b.error).slice(0, 5);
 }
 
 export default function CurveInverter() {
@@ -100,14 +88,13 @@ export default function CurveInverter() {
   const [maxV, setMaxV] = useState(14);
   const [results, setResults] = useState([]);
   const [draggingIdx, setDraggingIdx] = useState(null);
-  const [selectedCurve, setSelectedCurve] = useState(null);
+  const [selectedCurves, setSelectedCurves] = useState([]);
 
   const svgRef = useRef(null);
   const stepWidth = (WIDTH - 2 * PADDING) / (POINTS - 1);
-
-  const valueToY = (v) => HEIGHT - PADDING - (v / 16) * (HEIGHT - 2 * PADDING);
-  const yToValue = (y) => Math.min(16, Math.max(0, ((HEIGHT - PADDING - y) / (HEIGHT - 2 * PADDING)) * 16));
-
+  const valueToY = v => HEIGHT - PADDING - (v / 16) * (HEIGHT - 2 * PADDING);
+  const yToValue = y => Math.min(16, Math.max(0, ((HEIGHT - PADDING - y) / (HEIGHT - 2 * PADDING)) * 16));
+  
   useEffect(() => {
     function onMouseMove(e) {
       if (draggingIdx !== null && draggingIdx < POINTS - 1) {
@@ -119,9 +106,7 @@ export default function CurveInverter() {
         setValues(newVals);
       }
     }
-    function onMouseUp() {
-      setDraggingIdx(null);
-    }
+    function onMouseUp() { setDraggingIdx(null); }
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
     return () => {
@@ -131,37 +116,38 @@ export default function CurveInverter() {
   }, [draggingIdx, values]);
 
   const handleEstimate = () => {
-    let targetCurve = interpolateCurve(values);
-    setResults(findClosestConfigs(targetCurve, Number(minV), Number(maxV)));
-    setSelectedCurve(null);
+    const targetCurve = interpolateCurve(values);
+    setResults(findClosestConfigs(targetCurve, minV, maxV));
+    setSelectedCurves([]);
   };
 
-  function renderSimCurves() {
-    if (!selectedCurve) return null;
-    let c = selectedCurve.simCurve;
-    return (
+  function renderSimCurveSVG() {
+    if (!selectedCurves.length) return null;
+    return selectedCurves.map((curveObj, i) => (
       <polyline
+        key={curveObj._id}
         fill="none"
         stroke="#ffb300"
         strokeWidth={2.2}
         strokeDasharray="8 2"
-        points={c.map((v, idx) => {
+        opacity={0.7 - i*0.2}
+        points={curveObj.simCurve.map((v, idx) => {
           const x = PADDING + idx * ((WIDTH - 2 * PADDING) / 100);
           const y = valueToY(Math.max(0, Math.min(16, v)));
           return `${x},${y}`;
         }).join(' ')}
       />
-    );
+    ));
   }
 
   return (
     <Box sx={{ p: 3, backgroundColor: '#181818', borderRadius: 2, maxWidth: 1100, margin: 'auto' }}>
       <Typography variant="h5" sx={{ color: '#fff', mb: 2 }}>
-        Inversión de curva (arrastre gráfico)
+        Inversión de curva (TICTAC V7, fiel)
       </Typography>
       <Typography variant="body1" sx={{ color: '#ddd', mb: 2 }}>
-        Arrastra los puntos azules para definir la curva deseada. El último punto (100%) es fijo.<br />
-        Pulsa el botón para ver los mejores parámetros. Marca una fila para comparar la curva original (azul) con la aproximada (naranja punteada).
+        Arrastra los <b>15 puntos azules</b>. El último punto (100%) es fijo.<br />
+        Marca una o varias filas tras calcular para superponer curvas óptimas (naranja) junto a la tuya (azul).
       </Typography>
       <Box sx={{ display: 'flex', gap: 2, mb: 2, alignItems: 'flex-end' }}>
         <Box>
@@ -170,13 +156,8 @@ export default function CurveInverter() {
             variant="filled"
             type="number"
             value={minV}
-            onChange={(e) => setMinV(e.target.value)}
-            inputProps={{
-              step: '0.1',
-              min: 0,
-              max: maxV,
-              style: { color: '#222', textAlign: 'center', background: "#fff" }
-            }}
+            onChange={e => setMinV(e.target.value)}
+            inputProps={{ step: '0.1', min: 0, max: maxV, style: { color: '#222', textAlign: 'center', background: "#fff" }}}
             size="small"
             sx={{ background: '#fff', borderRadius: 1, width: 130 }}
             InputLabelProps={{ style: { color: '#222' } }}
@@ -188,13 +169,8 @@ export default function CurveInverter() {
             variant="filled"
             type="number"
             value={maxV}
-            onChange={(e) => setMaxV(e.target.value)}
-            inputProps={{
-              step: '0.1',
-              min: minV,
-              max: 16,
-              style: { color: '#222', textAlign: 'center', background: "#fff" }
-            }}
+            onChange={e => setMaxV(e.target.value)}
+            inputProps={{ step: '0.1', min: minV, max: 16, style: { color: '#222', textAlign: 'center', background: "#fff" }}}
             size="small"
             sx={{ background: '#fff', borderRadius: 1, width: 130 }}
             InputLabelProps={{ style: { color: '#222' } }}
@@ -214,7 +190,6 @@ export default function CurveInverter() {
         height={HEIGHT}
         style={{ background: '#fff', borderRadius: 10, cursor: 'crosshair', border: '2px solid #1976d2', display: "block", marginBottom: 8 }}
       >
-        {/* Curva original */}
         <polyline
           fill="none"
           stroke="#1976d2"
@@ -225,8 +200,7 @@ export default function CurveInverter() {
             return `${x},${y}`;
           }).join(' ')}
         />
-        {/* Curva simulada seleccionada */}
-        {renderSimCurves()}
+        {renderSimCurveSVG()}
         {values.map((v, i) => {
           const x = PADDING + i * stepWidth;
           const y = HEIGHT - PADDING - (v / 16) * (HEIGHT - 2 * PADDING);
@@ -239,7 +213,7 @@ export default function CurveInverter() {
               fill={i === POINTS - 1 ? "#888" : "#1976d2"}
               stroke="#222"
               style={{ cursor: i === POINTS - 1 ? 'default' : 'pointer', transition: "r 0.13s" }}
-              onMouseDown={(e) => {
+              onMouseDown={e => {
                 if (i !== POINTS - 1) {
                   setDraggingIdx(i);
                   e.preventDefault();
@@ -248,10 +222,8 @@ export default function CurveInverter() {
             />
           );
         })}
-        {/* Ejes */}
         <line x1={PADDING} y1={HEIGHT - PADDING} x2={WIDTH - PADDING} y2={HEIGHT - PADDING} stroke="#bbb" />
         <line x1={PADDING} y1={PADDING} x2={PADDING} y2={HEIGHT - PADDING} stroke="#bbb" />
-        {/* Etiquetas */}
         {[0, 4, 8, 12, 16].map((yv) => (
           <text
             key={`v${yv}`}
@@ -273,10 +245,9 @@ export default function CurveInverter() {
           >{Math.round(pct * (100 / 14))}%</text>
         ))}
       </svg>
-
       <Box sx={{ mt: 3 }}>
         <Typography variant="h6" sx={{ color: '#fff', mb: 1 }}>
-          Tabla de mejores coincidencias (selecciona para comparar):
+          Tabla de mejores perfiles (marca para comparar curvas):
         </Typography>
         {results.length > 0 && (
           <TableContainer component={Paper} sx={{ background: "#222" }}>
@@ -284,13 +255,13 @@ export default function CurveInverter() {
               <TableHead>
                 <TableRow>
                   {PARAMS.map(par =>
-                    <TableCell key={par.key} sx={{ color: "#fff", fontSize: 12, minWidth: 60 }}>
+                    <TableCell key={par.key} sx={{ color: "#fff", fontSize: 12 }}>
                       <strong>{par.key}</strong>
                       <div style={{ fontSize: 10, color: "#ace" }}>{par.desc}</div>
                     </TableCell>
                   )}
                   <TableCell sx={{ color: "#fff", fontSize: 12, minWidth: 70 }}>
-                    V Máx. buscado
+                    V Máx
                   </TableCell>
                   <TableCell sx={{ color: "#fff", fontSize: 12, minWidth: 38 }}>
                     Error
@@ -303,14 +274,14 @@ export default function CurveInverter() {
               </TableHead>
               <TableBody>
                 {results.map((row, idx) => (
-                  <TableRow key={idx} hover>
+                  <TableRow key={row._id} hover>
                     {PARAMS.map(par =>
                       <TableCell key={par.key} sx={{ color: "#fff", fontSize: 14 }}>
                         {row[par.key]}
                       </TableCell>
                     )}
                     <TableCell sx={{ color: "#bfe", fontSize: 14 }}>
-                      {row.volt}V
+                      {row.maxV}V
                     </TableCell>
                     <TableCell sx={{ color: "#ffa", fontSize: 14 }}>
                       {row.error.toFixed(0)}
@@ -320,8 +291,13 @@ export default function CurveInverter() {
                     </TableCell>
                     <TableCell>
                       <Checkbox
-                        checked={selectedCurve && selectedCurve.error === row.error}
-                        onChange={() => setSelectedCurve(selectedCurve && selectedCurve.error === row.error ? null : row)}
+                        checked={selectedCurves.some(sel => sel._id === row._id)}
+                        onChange={() => {
+                          setSelectedCurves(selectedCurves.some(sel => sel._id === row._id)
+                            ? selectedCurves.filter(sel => sel._id !== row._id)
+                            : [...selectedCurves, row]
+                          );
+                        }}
                         sx={{ color: "#29b6f6" }}
                         inputProps={{ "aria-label": "Selecciona para comparar gráfica" }}
                       />
